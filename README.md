@@ -1,67 +1,39 @@
-# Payload Blank Template
+# plugin-ecommerce: variant joins silently capped at 10
 
-This template comes configured with the bare minimum to get started on anything you need.
+Minimal reproduction for two bugs in `@payloadcms/plugin-ecommerce` 3.90.2. Both come from join queries that pass no `limit` and fall back to the adapter default of 10.
 
-## Quick start
+1. **`VariantOptionsSelector` only offers the first 10 options of a variant type.** Options 11+ can never be attached to a variant.
+2. **`validateOptions` only compares against 10 sibling variants**, so a product with more than 10 variants accepts duplicate option combinations.
 
-This template can be deployed directly from our Cloud hosting and it will setup MongoDB and cloud S3 object storage for media.
+Blank `create-payload-app` template (SQLite). The only changes are `@payloadcms/plugin-ecommerce` in `src/payload.config.ts` and the script in `src/repro.ts`.
 
-## Quick Start - local setup
+## Run
 
-To spin up this template locally, follow these steps:
+```bash
+pnpm install
+cp .env.example .env
+pnpm repro              # reproduces both bugs
+pnpm repro:workaround   # same script with defaultLimit: 0 on the two join fields -> both gone
+```
 
-### Clone
+`src/repro.ts` wipes the ecommerce collections, then:
 
-After you click the `Deploy` button above, you'll want to have standalone copy of this repo on your machine. If you've already cloned this repo, skip to [Development](#development).
+- creates a `color` variant type with 12 options and runs the **same `findByID` query `VariantOptionsSelector` runs**. Only 10 options come back; `white` and `yellow` are missing.
+- creates a product with 11 `size` variants, shows that the `validateOptions` join query only returns the 10 newest, then:
+  - control: duplicating the newest variant's option is rejected, as expected;
+  - bug: duplicating the oldest variant's option (outside the join result) is saved.
 
-### Development
+Expected output of `pnpm repro`:
 
-1. First [clone the repo](#clone) if you have not done so already
-2. `cd my-project && cp .env.example .env` to copy the example environment variables. You'll need to add the `MONGODB_URL` from your Cloud project to your `.env` if you want to use S3 storage and the MongoDB database that was created for you.
+```
+[Bug 1] options in DB for "color": 12
+[Bug 1] options offered by VariantOptionsSelector: 10 [ 'black', 'blue', 'brown', 'gray', 'green', 'navy', 'orange', 'pink', 'purple', 'red' ]
+[Bug 1] options the editor can never select: [ 'white', 'yellow' ]
 
-3. `pnpm install && pnpm dev` to install dependencies and start the dev server
-4. open `http://localhost:3000` to open the app in your browser
+[Bug 2] variants on product: 11 | variants validateOptions compares against: 10
+[Bug 2] variants outside the join result: [ 1 ]
+[Bug 2] control: duplicate of a visible sibling rejected: The following field is invalid: Variant options
+[Bug 2] DUPLICATE SAVED: option 13 already used by variant 1
 
-That's it! Changes made in `./src` will be reflected in your app. Follow the on-screen instructions to login and create your first admin user. Then check out [Production](#production) once you're ready to build and serve your app, and [Deployment](#deployment) when you're ready to go live.
-
-#### Docker (Optional)
-
-If you prefer to use Docker for local development instead of a local MongoDB instance, the provided docker-compose.yml file can be used.
-
-To do so, follow these steps:
-
-- Modify the `MONGODB_URL` in your `.env` file to `mongodb://127.0.0.1/<dbname>`
-- Modify the `docker-compose.yml` file's `MONGODB_URL` to match the above `<dbname>`
-- Run `docker-compose up` to start the database, optionally pass `-d` to run in the background.
-
-## How it works
-
-The Payload config is tailored specifically to the needs of most websites. It is pre-configured in the following ways:
-
-### Collections
-
-See the [Collections](https://payloadcms.com/docs/configuration/collections) docs for details on how to extend this functionality.
-
-- #### Users (Authentication)
-
-  Users are auth-enabled collections that have access to the admin panel.
-
-  For additional help, see the official [Auth Example](https://github.com/payloadcms/payload/tree/3.x/examples/auth) or the [Authentication](https://payloadcms.com/docs/authentication/overview#authentication-overview) docs.
-
-- #### Media
-
-  This is the uploads enabled collection. It features pre-configured sizes, focal point and manual resizing to help you manage your pictures.
-
-### Docker
-
-Alternatively, you can use [Docker](https://www.docker.com) to spin up this template locally. To do so, follow these steps:
-
-1. Follow [steps 1 and 2 from above](#development), the docker-compose file will automatically use the `.env` file in your project root
-1. Next run `docker-compose up`
-1. Follow [steps 4 and 5 from above](#development) to login and create your first admin user
-
-That's it! The Docker instance will help you get up and running quickly while also standardizing the development environment across your teams.
-
-## Questions
-
-If you have any issues or questions, reach out to us on [Discord](https://discord.com/invite/payload) or start a [GitHub discussion](https://github.com/payloadcms/payload/discussions).
+Result: bug1=REPRODUCED bug2=REPRODUCED
+```
